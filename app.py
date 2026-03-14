@@ -1,3 +1,6 @@
+import torch
+import torchvision.models as models
+from utils.preprocess import preprocess
 import streamlit as st
 from PIL import Image
 import time
@@ -323,3 +326,44 @@ if image_to_classify or selected_sample:
                 f"</div>",
                 unsafe_allow_html=True,
             )
+model = models.resnet18()
+model.fc = torch.nn.Linear(model.fc.in_features, 4)
+model.eval()
+def predict_cnn(image):
+
+    tensor = preprocess(image)
+
+    outputs = model(tensor)
+
+    _, predicted = torch.max(outputs, 1)
+
+    classes = ["plastic","paper","glass","metal"]
+
+    return classes[predicted.item()]
+from transformers import CLIPProcessor, CLIPModel
+
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+def predict_clip(image):
+
+    labels = ["plastic waste","paper waste","glass waste","metal waste"]
+
+    inputs = processor(
+        text=labels,
+        images=image,
+        return_tensors="pt",
+        padding=True
+    )
+
+    outputs = clip_model(**inputs)
+
+    probs = outputs.logits_per_image.softmax(dim=1)
+
+    index = probs.argmax()
+
+    return labels[index]
+cnn_result = predict_cnn(image)
+clip_result = predict_clip(image)
+
+st.success(f"CNN Prediction: {cnn_result}")
+st.info(f"CLIP Prediction: {clip_result}")
