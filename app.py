@@ -1,184 +1,162 @@
 import streamlit as st
 import torch
-import torch.nn.functional as F
+import torchvision.transforms as transforms
 import torchvision.models as models
-from torchvision import transforms
-from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
+from transformers import CLIPProcessor, CLIPModel
 
-# -------------------------------------------------
-# Page Configuration
-# -------------------------------------------------
+# ------------------------------
+# Page settings
+# ------------------------------
 
-st.set_page_config(
-    page_title="WasteAI — CNN vs CLIP",
-    page_icon="♻️",
-    layout="wide"
-)
+st.set_page_config(page_title="Waste Classification AI", layout="wide")
 
-st.title("♻️ Waste Classification System")
-st.write("Comparison of **CNN (Supervised)** vs **CLIP (Zero-Shot)**")
+st.title("♻ Smart Waste Classification System")
+st.subheader("CNN vs CLIP Model Comparison")
 
-# -------------------------------------------------
+# ------------------------------
 # Waste Classes
-# -------------------------------------------------
+# ------------------------------
 
 classes = ["plastic", "paper", "glass", "metal"]
 
-# -------------------------------------------------
-# Image Transform for CNN
-# -------------------------------------------------
+clip_labels = [
+    "a photo of plastic waste",
+    "a photo of paper waste",
+    "a photo of glass waste",
+    "a photo of metal waste"
+]
+
+# ------------------------------
+# Image preprocessing for CNN
+# ------------------------------
 
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor()
+    transforms.Resize((224,224)),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485,0.456,0.406],
+        std=[0.229,0.224,0.225]
+    )
 ])
 
-# -------------------------------------------------
-# Load CNN Model
-# -------------------------------------------------
+# ------------------------------
+# Load CNN model
+# ------------------------------
 
 @st.cache_resource
-def load_cnn_model():
+def load_cnn():
 
-    model = models.resnet18(pretrained=False)
+    model = models.resnet18(weights="DEFAULT")
 
     model.fc = torch.nn.Linear(model.fc.in_features, len(classes))
 
-    model.load_state_dict(torch.load("models/cnn_model.pth", map_location="cpu"))
+    # If you have trained weights later
+    # model.load_state_dict(torch.load("cnn_model.pth", map_location="cpu"))
 
     model.eval()
 
     return model
 
 
-cnn_model = load_cnn_model()
+cnn_model = load_cnn()
 
-# -------------------------------------------------
+# ------------------------------
+# Load CLIP model
+# ------------------------------
+
+@st.cache_resource
+def load_clip():
+
+    clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+
+    return clip_model, processor
+
+
+clip_model, processor = load_clip()
+
+# ------------------------------
 # CNN Prediction
-# -------------------------------------------------
+# ------------------------------
 
 def predict_cnn(image):
 
     img = transform(image).unsqueeze(0)
 
     with torch.no_grad():
-
         outputs = cnn_model(img)
 
-        probs = F.softmax(outputs, dim=1)
+    probs = torch.nn.functional.softmax(outputs, dim=1)
 
-        index = probs.argmax().item()
+    conf, pred = torch.max(probs,1)
 
-        confidence = probs[0][index].item()
-
-    return classes[index], confidence
+    return classes[pred.item()], conf.item()*100
 
 
-# -------------------------------------------------
-# Load CLIP Model
-# -------------------------------------------------
-
-@st.cache_resource
-def load_clip():
-
-    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-
-    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-
-    return model, processor
-
-
-clip_model, processor = load_clip()
-
-# -------------------------------------------------
-# CLIP Labels
-# -------------------------------------------------
-
-labels = [
-    "plastic waste",
-    "paper waste",
-    "glass waste",
-    "metal waste"
-]
-
-# -------------------------------------------------
+# ------------------------------
 # CLIP Prediction
-# -------------------------------------------------
+# ------------------------------
 
 def predict_clip(image):
 
     inputs = processor(
-        text=labels,
+        text=clip_labels,
         images=image,
         return_tensors="pt",
         padding=True
     )
 
-    with torch.no_grad():
+    outputs = clip_model(**inputs)
 
-        outputs = clip_model(**inputs)
+    probs = outputs.logits_per_image.softmax(dim=1)
 
-        probs = outputs.logits_per_image.softmax(dim=1)
+    conf, pred = torch.max(probs,1)
 
-        index = probs.argmax().item()
-
-        confidence = probs[0][index].item()
-
-    return labels[index], confidence
+    return classes[pred.item()], conf.item()*100
 
 
-# -------------------------------------------------
+# ------------------------------
 # Upload Image
-# -------------------------------------------------
+# ------------------------------
 
 uploaded_file = st.file_uploader(
     "Upload Waste Image",
-    type=["jpg", "jpeg", "png"]
+    type=["jpg","jpeg","png"]
 )
 
-# -------------------------------------------------
-# Run Predictions
-# -------------------------------------------------
-
-if uploaded_file is not None:
+if uploaded_file:
 
     image = Image.open(uploaded_file).convert("RGB")
 
-    st.image(image, caption="Input Image", width=300)
+    st.image(image, caption="Uploaded Image", width=300)
 
-    with st.spinner("Running Models..."):
+    if st.button("Run Prediction"):
 
-        cnn_pred, cnn_conf = predict_cnn(image)
+        with st.spinner("Running AI models..."):
 
-        clip_pred, clip_conf = predict_clip(image)
+            cnn_label, cnn_conf = predict_cnn(image)
 
-    col1, col2 = st.columns(2)
+            clip_label, clip_conf = predict_clip(image)
 
-    # CNN Result
-    with col1:
+        col1, col2 = st.columns(2)
 
-        st.subheader("CNN Prediction")
+        with col1:
+            st.success("CNN Prediction")
+            st.write(f"Class: **{cnn_label}**")
+            st.progress(int(cnn_conf))
+            st.write(f"Confidence: {cnn_conf:.2f}%")
 
-        st.success(f"Class: {cnn_pred}")
+        with col2:
+            st.info("CLIP Prediction")
+            st.write(f"Class: **{clip_label}**")
+            st.progress(int(clip_conf))
+            st.write(f"Confidence: {clip_conf:.2f}%")
 
-        st.write(f"Confidence: {cnn_conf:.2f}")
+# ------------------------------
+# Footer
+# ------------------------------
 
-    # CLIP Result
-    with col2:
+st.markdown("---")
 
-        st.subheader("CLIP Prediction")
-
-        st.info(f"Class: {clip_pred}")
-
-        st.write(f"Confidence: {clip_conf:.2f}")
-
-    # Agreement Check
-
-    if cnn_pred in clip_pred:
-
-        st.success("✅ Both models agree")
-
-    else:
-
-        st.warning("⚠ Models disagree – manual inspection recommended")
+st.write("Developed for Waste Management AI Project")
