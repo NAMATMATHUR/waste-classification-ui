@@ -5,31 +5,52 @@ import torchvision.models as models
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 
-# ------------------------------
-# Page settings
-# ------------------------------
+# -------------------------
+# Page Settings
+# -------------------------
 
 st.set_page_config(page_title="Waste Classification AI", layout="wide")
 
 st.title("♻ Smart Waste Classification System")
-st.subheader("CNN vs CLIP Model Comparison")
+st.subheader("CNN vs CLIP Waste Detection")
 
-# ------------------------------
+# -------------------------
 # Waste Classes
-# ------------------------------
+# -------------------------
 
-classes = ["plastic", "paper", "glass", "metal"]
+classes = [
+    "plastic","plastic","plastic","plastic",
+    "paper","paper","paper",
+    "cardboard","cardboard",
+    "glass","glass","glass",
+    "metal","metal","metal"
+]
 
 clip_labels = [
     "a photo of plastic waste",
-    "a photo of paper waste",
-    "a photo of glass waste",
-    "a photo of metal waste"
+    "a plastic bottle",
+    "plastic packaging",
+    "plastic container",
+
+    "paper waste",
+    "newspaper",
+    "office paper",
+
+    "cardboard waste",
+    "cardboard box",
+
+    "glass waste",
+    "glass bottle",
+    "broken glass",
+
+    "metal waste",
+    "aluminum can",
+    "steel can"
 ]
 
-# ------------------------------
-# Image preprocessing for CNN
-# ------------------------------
+# -------------------------
+# Image Transform
+# -------------------------
 
 transform = transforms.Compose([
     transforms.Resize((224,224)),
@@ -40,45 +61,43 @@ transform = transforms.Compose([
     )
 ])
 
-# ------------------------------
-# Load CNN model
-# ------------------------------
+# -------------------------
+# Load CNN Model
+# -------------------------
 
 @st.cache_resource
 def load_cnn():
 
     model = models.resnet18(weights="DEFAULT")
 
-    model.fc = torch.nn.Linear(model.fc.in_features, len(classes))
+    model.fc = torch.nn.Linear(model.fc.in_features, 4)
 
-    # If you have trained weights later
+    # Load your trained model later
     # model.load_state_dict(torch.load("cnn_model.pth", map_location="cpu"))
 
     model.eval()
 
     return model
 
-
 cnn_model = load_cnn()
 
-# ------------------------------
-# Load CLIP model
-# ------------------------------
+# -------------------------
+# Load CLIP Model
+# -------------------------
 
 @st.cache_resource
 def load_clip():
 
-    clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-    return clip_model, processor
-
+    return model, processor
 
 clip_model, processor = load_clip()
 
-# ------------------------------
+# -------------------------
 # CNN Prediction
-# ------------------------------
+# -------------------------
 
 def predict_cnn(image):
 
@@ -91,12 +110,13 @@ def predict_cnn(image):
 
     conf, pred = torch.max(probs,1)
 
-    return classes[pred.item()], conf.item()*100
+    class_names = ["plastic","paper","glass","metal"]
 
+    return class_names[pred.item()], conf.item()*100
 
-# ------------------------------
+# -------------------------
 # CLIP Prediction
-# ------------------------------
+# -------------------------
 
 def predict_clip(image):
 
@@ -113,30 +133,44 @@ def predict_clip(image):
 
     conf, pred = torch.max(probs,1)
 
-    return classes[pred.item()], conf.item()*100
+    predicted_class = classes[pred.item()]
 
+    return predicted_class, conf.item()*100
 
-# ------------------------------
-# Upload Image
-# ------------------------------
+# -------------------------
+# Input Section
+# -------------------------
+
+st.header("Upload or Capture Waste Image")
 
 uploaded_file = st.file_uploader(
     "Upload Waste Image",
     type=["jpg","jpeg","png"]
 )
 
-if uploaded_file:
+camera_photo = st.camera_input("Or take a photo")
 
+image = None
+
+if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
 
-    st.image(image, caption="Uploaded Image", width=300)
+elif camera_photo is not None:
+    image = Image.open(camera_photo).convert("RGB")
+
+# -------------------------
+# Prediction
+# -------------------------
+
+if image is not None:
+
+    st.image(image, caption="Input Image", width=300)
 
     if st.button("Run Prediction"):
 
-        with st.spinner("Running AI models..."):
+        with st.spinner("Analyzing waste..."):
 
             cnn_label, cnn_conf = predict_cnn(image)
-
             clip_label, clip_conf = predict_clip(image)
 
         col1, col2 = st.columns(2)
@@ -153,10 +187,9 @@ if uploaded_file:
             st.progress(int(clip_conf))
             st.write(f"Confidence: {clip_conf:.2f}%")
 
-# ------------------------------
+# -------------------------
 # Footer
-# ------------------------------
+# -------------------------
 
 st.markdown("---")
-
-st.write("Developed for Waste Management AI Project")
+st.write("Developed for AI Waste Management Project")
